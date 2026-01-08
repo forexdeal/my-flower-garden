@@ -10,18 +10,28 @@
     <!-- Firebase SDK 임포트 -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // 환경 변수 설정
-       apiKey: "AIzaSyDBoIKG_1uKmpoEoEL9Og60lQAdQU5Rij8",
-  authDomain: "my-flower-garden-854d3.firebaseapp.com",
-  projectId: "my-flower-garden-854d3",
-  storageBucket: "my-flower-garden-854d3.firebasestorage.app",
-  messagingSenderId: "959879973342",
-  appId: "1:959879973342:web:76c1df7ca11d4b7316354f",
-  measurementId: "G-JTR9F40G1Z"
-        // 전역 변수 노출
+        // 사장님이 직접 가져오신 파이어베이스 열쇠 설정
+        const firebaseConfig = {
+            apiKey: "AIzaSyDBoIKG_1uKmpoEoEL9Og60lQAdQU5Rij8",
+            authDomain: "my-flower-garden-854d3.firebaseapp.com",
+            projectId: "my-flower-garden-854d3",
+            storageBucket: "my-flower-garden-854d3.firebasestorage.app",
+            messagingSenderId: "959879973342",
+            appId: "1:959879973342:web:76c1df7ca11d4b7316354f",
+            measurementId: "G-JTR9F40G1Z"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        
+        // 깃허브 배포를 위한 앱 ID 설정
+        const appId = 'flower-garden-v20';
+
+        // 전역 변수 노출 (다른 스크립트에서 사용 가능하게 함)
         window.db = db;
         window.auth = auth;
         window.appId = appId;
@@ -60,7 +70,6 @@
             50% { transform: rotate(3deg); }
         }
 
-        /* 게임 카드 크기 최적화 */
         .flower-card {
             width: 100%;
             max-width: 120px;
@@ -115,12 +124,6 @@
         }
 
         .community-item { border-left-color: #F6AD55; }
-
-        #game-grid {
-            max-width: 500px;
-            width: 100%;
-            margin: 0 auto;
-        }
     </style>
 </head>
 <body class="flex flex-col h-screen">
@@ -215,8 +218,8 @@
     </div>
 
     <script type="module">
-        import { signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { doc, setDoc, getDoc, collection, addDoc, updateDoc, onSnapshot, query, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { doc, collection, addDoc, updateDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const flowerDb = [
             { icon: '🌸', name: '벚꽃' }, { icon: '🌻', name: '해바라기' },
@@ -234,29 +237,23 @@
         let currentUser = null;
         let communityUnsubscribe = null;
 
-        // Firebase 초기화 로직 (RULE 3 준수)
         const init = async () => {
             const auth = window.auth;
             if (!auth) return;
 
             try {
-                // 토큰 있으면 토큰으로, 없으면 익명 로그인
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
+                // 파이어베이스 익명 로그인 시작
+                await signInAnonymously(auth);
             } catch (err) {
-                console.error("Auth failed:", err);
+                console.error("인증 실패:", err);
             }
 
             onAuthStateChanged(auth, (user) => {
                 currentUser = user;
                 if (user) {
                     loadLocalData();
-                    updateUI();
-                    updateGarden();
-                    // 로그인 된 후에 리스너 시작
+                    window.updateUI();
+                    window.updateGarden();
                     startCommunityListener();
                 }
             });
@@ -293,7 +290,6 @@
             }
         };
 
-        // 커뮤니티 리스너 (RULE 1 경로 준수)
         function startCommunityListener() {
             if(!window.db || !currentUser) return;
             if(communityUnsubscribe) communityUnsubscribe();
@@ -306,8 +302,6 @@
                 
                 const posts = [];
                 snapshot.forEach(doc => posts.push({id: doc.id, ...doc.data()}));
-                
-                // 메모리 내 정렬 (RULE 2 준수: 복합 쿼리 방지)
                 posts.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
 
                 if(posts.length === 0) {
@@ -334,7 +328,7 @@
                     container.appendChild(item);
                 });
             }, (err) => {
-                console.error("Community listener error:", err);
+                console.error("커뮤니티 연결 오류:", err);
             });
         }
 
@@ -359,17 +353,15 @@
                 userId: currentUser.uid
             };
 
-            // 로컬 반영
             diaries.unshift(newEntry);
             localStorage.setItem('diaries', JSON.stringify(diaries));
             totalScore += 50;
             localStorage.setItem('totalScore', totalScore);
 
-            // 공개 저장 (RULE 1 경로 준수)
             if (isPublic && window.db) {
                 try {
                     await addDoc(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'posts'), newEntry);
-                } catch (e) { console.error("Save failed:", e); }
+                } catch (e) { console.error("저장 실패:", e); }
             }
 
             input.value = '';
@@ -380,7 +372,6 @@
             confetti({ particleCount: 100 });
         };
 
-        // UI 제어
         window.startGame = () => { currentStage = 1; hideAllScreens(); document.getElementById('game-screen').classList.remove('hidden'); initGame(); };
         window.goHome = () => { hideAllScreens(); document.getElementById('home-screen').classList.remove('hidden'); window.updateUI(); window.updateGarden(); };
         window.showCommunity = () => { hideAllScreens(); document.getElementById('community-screen').classList.remove('hidden'); };
@@ -402,7 +393,8 @@
         
         window.saveGardenImage = async () => {
             try {
-                const canvas = await html2canvas(document.getElementById('capture-area'), { scale: 2 });
+                const captureArea = document.getElementById('capture-area');
+                const canvas = await html2canvas(captureArea, { scale: 2 });
                 const link = document.createElement('a');
                 link.href = canvas.toDataURL("image/png");
                 link.download = `나의정원.png`;
@@ -414,7 +406,6 @@
             ['home-screen', 'game-screen', 'logs-screen', 'community-screen'].forEach(id => document.getElementById(id).classList.add('hidden'));
         }
 
-        // 게임 로직
         function initGame() {
             const grid = document.getElementById('game-grid');
             grid.innerHTML = '';
@@ -459,7 +450,6 @@
 
         window.nextStage = () => { currentStage++; document.getElementById('result-modal').style.display = 'none'; initGame(); };
 
-        // 시작!
         window.onload = init;
     </script>
 </body>
