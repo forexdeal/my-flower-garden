@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>청춘 꽃밭 - 우리들의 첫 앱</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- Firebase SDK 임포트 -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // 환경 변수 설정
+       apiKey: "AIzaSyDBoIKG_1uKmpoEoEL9Og60lQAdQU5Rij8",
+  authDomain: "my-flower-garden-854d3.firebaseapp.com",
+  projectId: "my-flower-garden-854d3",
+  storageBucket: "my-flower-garden-854d3.firebasestorage.app",
+  messagingSenderId: "959879973342",
+  appId: "1:959879973342:web:76c1df7ca11d4b7316354f",
+  measurementId: "G-JTR9F40G1Z"
+        // 전역 변수 노출
+        window.db = db;
+        window.auth = auth;
+        window.appId = appId;
+        window.firebaseUtils = { collection, doc, addDoc, updateDoc, onSnapshot, query, serverTimestamp };
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@700;800&display=swap');
+        
+        body {
+            font-family: 'Nanum Gothic', sans-serif;
+            background: #F3F4ED;
+            user-select: none;
+            overflow: hidden;
+            color: #2D3748;
+        }
+
+        #garden-display {
+            background: linear-gradient(to bottom, #A5D6A7 0%, #81C784 100%);
+            border-radius: 0 0 40px 40px;
+            position: relative;
+            overflow: hidden;
+            height: 280px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+
+        .planted-flower {
+            position: absolute;
+            bottom: 20px;
+            transition: all 0.5s ease-out;
+            animation: sway 3s infinite ease-in-out;
+            transform-origin: bottom center;
+        }
+
+        @keyframes sway {
+            0%, 100% { transform: rotate(-3deg); }
+            50% { transform: rotate(3deg); }
+        }
+
+        /* 게임 카드 크기 최적화 */
+        .flower-card {
+            width: 100%;
+            max-width: 120px;
+            aspect-ratio: 1 / 1.1;
+            perspective: 1000px;
+            margin: 0 auto;
+        }
+
+        .card-inner {
+            width: 100%; height: 100%;
+            background: white; border-radius: 20px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 2.5rem; box-shadow: 0 6px 0 #E2E8F0;
+            border: 4px solid #F7FAFC;
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        
+        .card-inner span { visibility: hidden; }
+        .card-inner.selected span, .card-inner.matched span { visibility: visible; }
+        .card-inner.selected { background: #FFF9C4; border-color: #F6E05E; transform: scale(1.05); }
+        .card-inner.matched { animation: match-out 0.6s forwards; }
+
+        @keyframes match-out {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.1); filter: brightness(1.2); }
+            100% { transform: scale(0); opacity: 0; }
+        }
+
+        .btn-main {
+            background: linear-gradient(180deg, #FF6B6B 0%, #EE5253 100%);
+            box-shadow: 0 8px 0 #C0392B; border-radius: 35px; transition: all 0.1s;
+        }
+        .btn-main:active { transform: translateY(6px); box-shadow: 0 4px 0 #C0392B; }
+
+        .btn-sub {
+            background: linear-gradient(180deg, #48BB78 0%, #38A169 100%);
+            box-shadow: 0 6px 0 #276749; border-radius: 25px; transition: all 0.1s;
+        }
+        .btn-sub:active { transform: translateY(4px); box-shadow: 0 2px 0 #276749; }
+
+        .modal {
+            display: none; position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.85); align-items: center; justify-content: center;
+            z-index: 200; backdrop-filter: blur(8px);
+        }
+
+        .log-item, .community-item {
+            background: white; border-left: 8px solid #48BB78;
+            border-radius: 15px; padding: 15px; margin-bottom: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.03);
+        }
+
+        .community-item { border-left-color: #F6AD55; }
+
+        #game-grid {
+            max-width: 500px;
+            width: 100%;
+            margin: 0 auto;
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen">
+
+    <!-- 홈 화면 -->
+    <div id="home-screen" class="flex-1 flex flex-col overflow-y-auto">
+        <div id="capture-area" class="bg-[#FDFBF0]">
+            <div id="garden-display">
+                <div class="absolute top-6 left-8 text-white">
+                    <h1 class="text-4xl font-black drop-shadow-lg">청춘 꽃밭</h1>
+                    <p class="text-lg font-bold opacity-90">나의 예쁜 정원</p>
+                </div>
+                <div id="medal-icon" class="absolute top-6 right-8 text-5xl"></div>
+                <div id="flower-bed" class="w-full h-full flex items-end justify-center px-6"></div>
+            </div>
+
+            <div class="p-8 text-center">
+                <div class="inline-block bg-white px-6 py-2 rounded-full border-2 border-green-100 mb-6 shadow-sm">
+                    <p class="text-green-800 font-bold text-xl">누적 점수: <span id="total-collected">0</span>점</p>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4 w-full max-w-sm mx-auto">
+                    <button onclick="startGame()" class="btn-main text-white text-3xl font-black py-6 px-4 col-span-2 mb-2">
+                        시작하기 🌸
+                    </button>
+                    <button onclick="showCommunity()" class="btn-sub text-white text-lg font-black py-4 px-2 bg-orange-400">
+                        우리 동네 소식
+                    </button>
+                    <button onclick="showLogs()" class="btn-sub text-white text-lg font-black py-4 px-2 bg-blue-500">
+                        성장 일지
+                    </button>
+                    <button onclick="saveGardenImage()" class="btn-sub text-white text-lg font-black py-4 px-2 bg-purple-500 col-span-2">
+                        정원 사진 저장하기 📸
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 우리 동네 소식 화면 -->
+    <div id="community-screen" class="hidden flex-1 flex flex-col bg-[#FDFBF0]">
+        <div class="top-bar flex items-center p-4 bg-white border-b shadow-sm">
+            <button onclick="goHome()" class="text-lg bg-gray-100 py-2 px-4 rounded-xl font-bold mr-4">◀ 홈으로</button>
+            <h2 class="text-2xl font-black text-orange-600">우리 동네 꽃밭 소식</h2>
+        </div>
+        <div class="flex-1 overflow-y-auto p-6" id="community-container">
+            <p class="text-center mt-20 text-gray-400 font-bold">소식을 불러오는 중...</p>
+        </div>
+    </div>
+
+    <!-- 성장 일지 화면 -->
+    <div id="logs-screen" class="hidden flex-1 flex flex-col bg-[#FDFBF0]">
+        <div class="top-bar flex items-center p-4">
+            <button onclick="goHome()" class="text-lg bg-gray-100 py-2 px-4 rounded-xl font-bold mr-4">◀ 뒤로</button>
+            <h2 class="text-2xl font-black text-blue-800">나의 성장 일지</h2>
+        </div>
+        <div class="flex-1 overflow-y-auto p-6" id="logs-container"></div>
+    </div>
+
+    <!-- 일기 쓰기 모달 -->
+    <div id="diary-modal" class="modal">
+        <div class="bg-white rounded-[40px] p-8 m-6 max-w-sm w-full text-center">
+            <h2 class="text-2xl font-black text-blue-700 mb-4">오늘 기분은 어떠신가요?</h2>
+            <textarea id="diary-input" class="w-full border-2 border-blue-100 rounded-2xl p-4 text-xl mb-6 focus:outline-none" rows="3" placeholder="예: 오늘 참 즐거운 날이었다!"></textarea>
+            <div class="flex flex-col gap-3">
+                <button onclick="saveDiary(true)" class="btn-main text-white text-2xl font-bold py-4 px-10 w-full">동네에 자랑하고 기록</button>
+                <button onclick="saveDiary(false)" class="bg-blue-500 text-white text-xl font-bold py-3 px-10 rounded-3xl w-full">나만 보기로 기록</button>
+                <button onclick="closeModal('diary-modal')" class="text-lg text-gray-400 font-bold underline mt-2">안 쓸래요</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 게임 화면 -->
+    <div id="game-screen" class="hidden flex-1 flex flex-col bg-white">
+        <div class="top-bar flex justify-between items-center p-4 border-b">
+            <button onclick="goHome()" class="text-lg bg-gray-100 py-2 px-4 rounded-xl font-bold">◀ 그만</button>
+            <div class="text-2xl font-black text-green-700" id="stage-display">1단계</div>
+            <div></div>
+        </div>
+        <div class="flex-1 flex flex-col justify-center items-center p-4 overflow-hidden">
+            <div id="game-grid" class="grid gap-3 justify-center content-center h-full max-h-[70vh]"></div>
+        </div>
+    </div>
+
+    <div id="result-modal" class="modal">
+        <div class="bg-white rounded-[40px] p-8 m-6 max-w-sm w-full text-center shadow-2xl">
+            <h2 class="text-3xl font-black text-green-700 mb-4">참 잘하셨어요!</h2>
+            <p class="text-xl text-gray-700 font-bold mb-6">오늘의 추억을 기록해보세요.</p>
+            <button onclick="openDiaryModal()" class="btn-main text-white text-2xl font-bold py-6 px-10 rounded-3xl w-full mb-4">오늘의 한 줄 기록</button>
+            <button onclick="nextStage()" class="text-xl text-green-600 font-bold mb-4 block w-full">기록 없이 계속하기</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import { signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { doc, setDoc, getDoc, collection, addDoc, updateDoc, onSnapshot, query, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const flowerDb = [
+            { icon: '🌸', name: '벚꽃' }, { icon: '🌻', name: '해바라기' },
+            { icon: '🌷', name: '튤립' }, { icon: '🌹', name: '장미' },
+            { icon: '🌺', name: '무궁화' }, { icon: '🌼', name: '데이지' },
+            { icon: '🍀', name: '클로버' }, { icon: '🌿', name: '새싹' }
+        ];
+
+        let currentStage = 1;
+        let totalScore = 0;
+        let selectedCards = [];
+        let matchedCount = 0;
+        let totalCardsInStage = 0;
+        let diaries = [];
+        let currentUser = null;
+        let communityUnsubscribe = null;
+
+        // Firebase 초기화 로직 (RULE 3 준수)
+        const init = async () => {
+            const auth = window.auth;
+            if (!auth) return;
+
+            try {
+                // 토큰 있으면 토큰으로, 없으면 익명 로그인
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (err) {
+                console.error("Auth failed:", err);
+            }
+
+            onAuthStateChanged(auth, (user) => {
+                currentUser = user;
+                if (user) {
+                    loadLocalData();
+                    updateUI();
+                    updateGarden();
+                    // 로그인 된 후에 리스너 시작
+                    startCommunityListener();
+                }
+            });
+        };
+
+        function loadLocalData() {
+            totalScore = parseInt(localStorage.getItem('totalScore') || 0);
+            diaries = JSON.parse(localStorage.getItem('diaries') || "[]");
+        }
+
+        window.updateUI = () => {
+            document.getElementById('total-collected').innerText = totalScore.toLocaleString();
+            const medal = document.getElementById('medal-icon');
+            if (totalScore >= 3000) medal.innerText = '🥇';
+            else if (totalScore >= 1500) medal.innerText = '🥈';
+            else if (totalScore >= 500) medal.innerText = '🥉';
+            else medal.innerText = '';
+        };
+
+        window.updateGarden = () => {
+            const bed = document.getElementById('flower-bed');
+            if(!bed) return;
+            bed.innerHTML = '';
+            const count = Math.min(12, Math.floor(totalScore / 100) + 1);
+            for (let i = 0; i < count; i++) {
+                const flower = document.createElement('div');
+                flower.className = 'planted-flower';
+                flower.innerText = flowerDb[i % flowerDb.length].icon;
+                flower.style.fontSize = (Math.random() * 20 + 45) + 'px';
+                flower.style.left = (Math.random() * 80 + 10) + '%';
+                flower.style.bottom = (Math.random() * 30 + 10) + 'px';
+                flower.style.animationDelay = (Math.random() * 2) + 's';
+                bed.appendChild(flower);
+            }
+        };
+
+        // 커뮤니티 리스너 (RULE 1 경로 준수)
+        function startCommunityListener() {
+            if(!window.db || !currentUser) return;
+            if(communityUnsubscribe) communityUnsubscribe();
+
+            const postsRef = collection(window.db, 'artifacts', window.appId, 'public', 'data', 'posts');
+            
+            communityUnsubscribe = onSnapshot(postsRef, (snapshot) => {
+                const container = document.getElementById('community-container');
+                if(!container) return;
+                
+                const posts = [];
+                snapshot.forEach(doc => posts.push({id: doc.id, ...doc.data()}));
+                
+                // 메모리 내 정렬 (RULE 2 준수: 복합 쿼리 방지)
+                posts.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+
+                if(posts.length === 0) {
+                    container.innerHTML = '<p class="text-center mt-20 text-gray-400 font-bold">첫 소식을 남겨보세요!</p>';
+                    return;
+                }
+
+                container.innerHTML = '';
+                posts.forEach(post => {
+                    const item = document.createElement('div');
+                    item.className = 'community-item';
+                    item.innerHTML = `
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="text-sm font-bold text-orange-500">🌸 동네 주민</span>
+                            <span class="text-xs text-gray-400">${post.date || ''}</span>
+                        </div>
+                        <p class="text-xl font-bold text-gray-700 mb-3 break-keep">${post.content}</p>
+                        <div class="flex justify-end">
+                            <button onclick="window.likePost('${post.id}', ${post.likes || 0})" class="bg-pink-50 text-pink-500 px-4 py-1 rounded-full text-sm font-bold border border-pink-100">
+                                ❤️ 예뻐요 ${post.likes || 0}
+                            </button>
+                        </div>
+                    `;
+                    container.appendChild(item);
+                });
+            }, (err) => {
+                console.error("Community listener error:", err);
+            });
+        }
+
+        window.likePost = async (postId, currentLikes) => {
+            if(!currentUser || !window.db) return;
+            const postRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'posts', postId);
+            await updateDoc(postRef, { likes: currentLikes + 1 });
+            confetti({ particleCount: 30, spread: 50 });
+        };
+
+        window.saveDiary = async (isPublic) => {
+            const input = document.getElementById('diary-input');
+            const content = input.value.trim();
+            if (!content || !currentUser) return;
+
+            const newEntry = {
+                date: new Date().toLocaleDateString(),
+                content: content,
+                score: (currentStage * 20),
+                timestamp: serverTimestamp(),
+                likes: 0,
+                userId: currentUser.uid
+            };
+
+            // 로컬 반영
+            diaries.unshift(newEntry);
+            localStorage.setItem('diaries', JSON.stringify(diaries));
+            totalScore += 50;
+            localStorage.setItem('totalScore', totalScore);
+
+            // 공개 저장 (RULE 1 경로 준수)
+            if (isPublic && window.db) {
+                try {
+                    await addDoc(collection(window.db, 'artifacts', window.appId, 'public', 'data', 'posts'), newEntry);
+                } catch (e) { console.error("Save failed:", e); }
+            }
+
+            input.value = '';
+            window.closeModal('diary-modal');
+            window.updateUI();
+            window.updateGarden();
+            window.goHome();
+            confetti({ particleCount: 100 });
+        };
+
+        // UI 제어
+        window.startGame = () => { currentStage = 1; hideAllScreens(); document.getElementById('game-screen').classList.remove('hidden'); initGame(); };
+        window.goHome = () => { hideAllScreens(); document.getElementById('home-screen').classList.remove('hidden'); window.updateUI(); window.updateGarden(); };
+        window.showCommunity = () => { hideAllScreens(); document.getElementById('community-screen').classList.remove('hidden'); };
+        window.showLogs = () => {
+            hideAllScreens();
+            document.getElementById('logs-screen').classList.remove('hidden');
+            const container = document.getElementById('logs-container');
+            container.innerHTML = diaries.length === 0 ? '<p class="text-center mt-20 font-bold text-gray-400">일지를 기록해 보세요!</p>' : '';
+            diaries.forEach(entry => {
+                const item = document.createElement('div');
+                item.className = 'log-item';
+                item.innerHTML = `<div class="flex justify-between text-xs font-bold text-gray-400 mb-1"><span>${entry.date}</span><span class="text-green-600">+${entry.score}점</span></div><p class="text-xl font-bold text-gray-700">${entry.content}</p>`;
+                container.appendChild(item);
+            });
+        };
+
+        window.closeModal = (id) => { document.getElementById(id).style.display = 'none'; };
+        window.openDiaryModal = () => { document.getElementById('result-modal').style.display = 'none'; document.getElementById('diary-modal').style.display = 'flex'; };
+        
+        window.saveGardenImage = async () => {
+            try {
+                const canvas = await html2canvas(document.getElementById('capture-area'), { scale: 2 });
+                const link = document.createElement('a');
+                link.href = canvas.toDataURL("image/png");
+                link.download = `나의정원.png`;
+                link.click();
+            } catch (e) { console.error(e); }
+        };
+
+        function hideAllScreens() {
+            ['home-screen', 'game-screen', 'logs-screen', 'community-screen'].forEach(id => document.getElementById(id).classList.add('hidden'));
+        }
+
+        // 게임 로직
+        function initGame() {
+            const grid = document.getElementById('game-grid');
+            grid.innerHTML = '';
+            matchedCount = 0; selectedCards = [];
+            document.getElementById('stage-display').innerText = `${currentStage}단계`;
+            
+            let config = (currentStage === 1) ? {row:2, col:2, cls:'grid-cols-2'} : (currentStage === 2) ? {row:3, col:2, cls:'grid-cols-2'} : {row:4, col:3, cls:'grid-cols-3'};
+            totalCardsInStage = config.row * config.col;
+            grid.className = `grid gap-4 w-full px-4 justify-center ${config.cls}`;
+            
+            const stageFlowers = flowerDb.slice(0, totalCardsInStage/2).map(f => f.icon);
+            let cardValues = [...stageFlowers, ...stageFlowers].sort(() => Math.random() - 0.5);
+            
+            cardValues.forEach((val, i) => {
+                const card = document.createElement('div');
+                card.className = 'flower-card';
+                card.innerHTML = `<div class="card-inner" id="card-${i}"><span class="pointer-events-none">${val}</span></div>`;
+                card.onclick = () => {
+                    const el = document.getElementById(`card-${i}`);
+                    if (el.classList.contains('matched') || selectedCards.some(c => c.i === i)) return;
+                    el.classList.add('selected');
+                    selectedCards.push({i, val});
+                    if (selectedCards.length === 2) setTimeout(checkMatch, 500);
+                };
+                grid.appendChild(card);
+            });
+        }
+
+        function checkMatch() {
+            const [c1, c2] = selectedCards;
+            const el1 = document.getElementById(`card-${c1.i}`), el2 = document.getElementById(`card-${c2.i}`);
+            if (c1.val === c2.val) {
+                el1.classList.add('matched'); el2.classList.add('matched');
+                matchedCount += 2;
+                if (matchedCount === totalCardsInStage) {
+                    confetti({ particleCount: 150 });
+                    setTimeout(() => document.getElementById('result-modal').style.display = 'flex', 800);
+                }
+            } else { el1.classList.remove('selected'); el2.classList.remove('selected'); }
+            selectedCards = [];
+        }
+
+        window.nextStage = () => { currentStage++; document.getElementById('result-modal').style.display = 'none'; initGame(); };
+
+        // 시작!
+        window.onload = init;
+    </script>
+</body>
+</html>
